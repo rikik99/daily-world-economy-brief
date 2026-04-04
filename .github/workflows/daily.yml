@@ -25,7 +25,10 @@ jobs:
         run: pip install requests
 
       - name: 실행
-        run: python main.py
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          echo "GEMINI_API_KEY exists: ${GEMINI_API_KEY:+yes}"
+          echo "NTFY_TOPIC exists: ${NTFY_TOPIC:+yes}"
+          python -u main.py
