@@ -5,6 +5,15 @@ import xml.etree.ElementTree as ET
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 
 
+KEYWORDS = {
+    "금리/통화": ["rate", "fed", "interest", "inflation"],
+    "에너지": ["oil", "gas", "energy"],
+    "중국": ["china"],
+    "미국": ["us", "america"],
+    "유럽": ["europe", "ecb"],
+}
+
+
 def get_news():
     url = "https://news.google.com/rss/search?q=world+economy&hl=en-US&gl=US&ceid=US:en"
     response = requests.get(url, timeout=30)
@@ -14,43 +23,45 @@ def get_news():
     items = root.findall(".//item")
 
     news_list = []
-    for item in items[:5]:
+    for item in items[:15]:
         title_elem = item.find("title")
-        link_elem = item.find("link")
+        title = title_elem.text.strip().lower()
 
-        title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
-        link = link_elem.text.strip() if link_elem is not None and link_elem.text else ""
-
-        if title:
-            news_list.append((title, link))
+        news_list.append(title)
 
     return news_list
 
 
-def make_summary(news_list):
-    if not news_list:
-        return "오늘 가져온 세계경제 뉴스가 없습니다."
+def categorize(news_list):
+    result = {k: [] for k in KEYWORDS.keys()}
 
-    lines = ["[오늘의 세계경제 뉴스]"]
-    for i, (title, link) in enumerate(news_list, start=1):
-        lines.append(f"{i}. {title}")
-        if link:
-            lines.append(link)
+    for title in news_list:
+        for category, words in KEYWORDS.items():
+            if any(word in title for word in words):
+                result[category].append(title)
+                break
+
+    return result
+
+
+def make_summary(categorized):
+    lines = ["📊 세계경제 핵심 브리핑"]
+
+    for category, items in categorized.items():
+        if items:
+            lines.append(f"\n[{category}]")
+            lines.append(f"- {items[0]}")
 
     return "\n".join(lines)
 
 
 def send_push(message):
-    if not NTFY_TOPIC:
-        raise ValueError("NTFY_TOPIC이 비어 있습니다.")
-
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
-    response = requests.post(url, data=message.encode("utf-8"), timeout=30)
-    response.raise_for_status()
+    requests.post(url, data=message.encode("utf-8"), timeout=30)
 
 
 if __name__ == "__main__":
     news = get_news()
-    message = make_summary(news)
+    categorized = categorize(news)
+    message = make_summary(categorized)
     send_push(message)
-    print("푸시 전송 완료")
