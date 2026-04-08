@@ -51,7 +51,81 @@ def get_news():
     return news_list
 
 
-def build_prompt(news_list):
+def fetch_yahoo_chart(symbol):
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+    params = {
+        "range": "5d",
+        "interval": "1d",
+        "includePrePost": "false",
+        "events": "div,splits"
+    }
+
+    response = requests.get(url, params=params, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    result = data["chart"]["result"][0]
+    meta = result.get("meta", {})
+    closes = result["indicators"]["quote"][0].get("close", [])
+
+    valid_closes = [c for c in closes if c is not None]
+    if len(valid_closes) < 2:
+        raise ValueError(f"{symbol} 종가 데이터 부족")
+
+    current = valid_closes[-1]
+    prev = valid_closes[-2]
+    change_pct = ((current - prev) / prev) * 100 if prev else 0.0
+
+    return {
+        "symbol": symbol,
+        "name": meta.get("symbol", symbol),
+        "currency": meta.get("currency", ""),
+        "current": round(current, 2),
+        "prev_close": round(prev, 2),
+        "change_pct": round(change_pct, 2),
+    }
+
+
+def get_market_snapshot():
+    # Yahoo Finance commonly used symbols
+    targets = {
+        "미국(S&P500)": "^GSPC",
+        "미국(나스닥)": "^IXIC",
+        "중국(상하이종합)": "000001.SS",
+        "한국(코스피)": "^KS11",
+        "달러인덱스": "DX-Y.NYB",
+        "WTI유가": "CL=F",
+    }
+
+    snapshot = {}
+
+    for label, symbol in targets.items():
+        try:
+            snapshot[label] = fetch_yahoo_chart(symbol)
+        except Exception as e:
+            snapshot[label] = {
+                "symbol": symbol,
+                "error": str(e)
+            }
+
+    return snapshot
+
+
+def build_market_stats_text(market_snapshot):
+    lines = []
+    for label, data in market_snapshot.items():
+        if "error" in data:
+            lines.append(f"- {label}: 데이터 조회 실패")
+            continue
+
+        sign = "+" if data["change_pct"] > 0 else ""
+        lines.append(
+            f"- {label}: {data['current']} ({sign}{data['change_pct']}%)"
+        )
+    return "\n".join(lines)
+
+
+def build_prompt(news_list, market_snapshot):
     articles = []
     for i, article in enumerate(news_list, start=1):
         articles.append(
@@ -60,41 +134,50 @@ def build_prompt(news_list):
             f"설명: {article['summary']}\n"
         )
 
-    joined = "\n".join(articles)
+    joined_news = "\n".join(articles)
+    market_stats = build_market_stats_text(market_snapshot)
 
     prompt = f"""
 너는 세계경제 뉴스 브리핑 전문가이자 투자 관점의 시장 해설가다.
 
-아래 뉴스들을 바탕으로, 한국어로 짧고 직관적이며 투자자가 바로 이해할 수 있게 브리핑해라.
+아래 뉴스들과 실제 시장 지표를 함께 보고, 한국어로 짧고 직관적으로 브리핑해라.
+중요한 원칙은 "뉴스 해석"과 "실제 시장 반응"을 구분해서 보는 것이다.
 
 반드시 아래 형식을 그대로 지켜라.
 
 📊 세계경제 핵심 브리핑
 
 🔥 오늘 한줄 결론
-- 오늘 시장을 한 문장으로 요약
+- 뉴스와 실제 시장 반응을 종합한 한 문장
 
 🚨 꼭 알아야 할 이슈
-- 오늘 뉴스들 중 시장에 큰 충격을 줄 수 있거나 반드시 체크해야 할 사건이 있으면 최대 2개까지 작성
-- 예: 전쟁 확전, 유가 급등 요인, 중앙은행 정책 급변, 관세/제재, 공급망 차질, 금융 시스템 불안, 대형 정책 변화
-- 정말 중요한 이슈가 없으면 이 섹션은 아예 생략
+- 시장에 큰 영향을 줄 만한 사건이 있으면 최대 2개
+- 정말 중요하지 않으면 이 섹션은 생략
+
+📈 실제 시장 통계
+- 🇺🇸 S&P500: 수치와 방향을 짧게
+- 🇺🇸 나스닥: 수치와 방향을 짧게
+- 🇨🇳 중국주식(상하이): 수치와 방향을 짧게
+- 🇰🇷 한국주식(코스피): 수치와 방향을 짧게
+- 💵 달러인덱스: 수치와 방향을 짧게
+- 🛢 WTI유가: 수치와 방향을 짧게
 
 🌍 시장 영향
-- 🇺🇸 미국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 이유를 짧게 설명
-- 🇨🇳 중국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 이유를 짧게 설명
-- 🇰🇷 한국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 이유를 짧게 설명
-- 💵 달러: 강세 / 약세 / 혼조 가능성 중 하나를 먼저 쓰고, 이유를 짧게 설명
-- 🛢 유가/원자재: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 이유를 짧게 설명
+- 🇺🇸 미국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
+- 🇨🇳 중국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
+- 🇰🇷 한국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
+- 💵 달러: 강세 / 약세 / 혼조 가능성 중 하나를 먼저 쓰고 설명
+- 🛢 유가/원자재: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고 설명
 
 🎯 테마/업종별 체크
 - 유리한 테마 3개
 - 불리한 테마 3개
-- 각 항목은 아래 형식으로 작성
+- 형식:
   - [강세 가능] 테마명: 이유 한 줄
   - [약세 가능] 테마명: 이유 한 줄
 
 📌 오늘 체크포인트
-- 시장에서 꼭 봐야 할 변수 3개
+- 오늘 꼭 봐야 할 변수 3개
 
 📰 주요 뉴스 3개
 1. 자연스러운 한국어 제목
@@ -105,35 +188,32 @@ def build_prompt(news_list):
 → 왜 중요한지 한 줄
 
 규칙:
-1. 출력은 한국어로만 작성한다.
-2. "변동성 확대 가능성" 같은 모호한 표현만 쓰지 말고, 방향성을 먼저 제시하라.
-3. 방향성은 기사 흐름을 종합해 현실적으로 판단하라.
-4. 미국 주식은 금리, 빅테크, 에너지, 유동성, 소비 흐름을 반영하라.
-5. 중국 주식은 정책 기대, 경기부양, 내수, 수출, 부동산 흐름을 반영하라.
-6. 한국 주식은 반도체, 2차전지, 자동차, 환율, 수출 민감도를 반영하라.
-7. 테마/업종은 실제 투자자가 바로 이해할 수 있게 작성하라.
-8. 예시 테마: 반도체, AI, 빅테크, 에너지, 원자재, 방산, 조선, 자동차, 2차전지, 소비재, 항공, 운송, 은행, 바이오 등
-9. 특정 종목명을 억지로 넣지 말고, 테마나 업종 중심으로 써라.
-10. 단정적 투자 추천은 금지하고, "강세 가능", "약세 가능", "부담", "우위" 형태로 표현하라.
-11. 기사 제목을 어색하게 직역하지 말고 자연스럽게 재작성하라.
-12. 중복 내용은 합쳐서 정리하라.
-13. 휴대폰에서 보기 좋게 짧고 밀도 높게 작성하라.
-14. 링크는 출력하지 않는다.
-15. "🚨 꼭 알아야 할 이슈"는 AI가 스스로 중요도를 판단해서 넣어라. 시장 영향이 제한적이면 억지로 쓰지 마라.
-16. 지정학, 중앙은행, 환율, 유가, 공급망, 정책 쇼크는 우선적으로 평가하라.
+1. 한국어로만 작성한다.
+2. 뉴스만 보고 방향을 단정하지 말고, 아래 실제 시장 통계도 함께 반영한다.
+3. 실제 지표가 뉴스 해석과 다르면, 그 차이를 짧게 설명한다.
+4. "변동성 확대" 같은 모호한 말만 하지 말고, 방향성을 먼저 제시한다.
+5. 투자 추천처럼 단정하지 말고, "강세 가능", "약세 가능", "부담", "우위", "반등 가능성" 형태로 표현한다.
+6. 미국 주식은 금리, 빅테크, 에너지, 유동성을 반영한다.
+7. 중국 주식은 정책 기대, 경기 회복, 내수, 부동산 흐름을 반영한다.
+8. 한국 주식은 반도체, 2차전지, 자동차, 환율, 수출 민감도를 반영한다.
+9. 링크는 출력하지 않는다.
+10. 휴대폰에서 읽기 좋게 짧고 밀도 높게 작성한다.
+
+실제 시장 통계:
+{market_stats}
 
 기사 목록:
-{joined}
+{joined_news}
 """.strip()
 
     return prompt
 
 
-def summarize_with_openai(news_list):
+def summarize_with_openai(news_list, market_snapshot):
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY_JUNS가 비어 있습니다.")
 
-    prompt = build_prompt(news_list)
+    prompt = build_prompt(news_list, market_snapshot)
 
     url = "https://api.openai.com/v1/responses"
     headers = {
@@ -143,7 +223,7 @@ def summarize_with_openai(news_list):
     payload = {
         "model": "gpt-5.4-nano",
         "input": prompt,
-        "max_output_tokens": 900,
+        "max_output_tokens": 1000,
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=120)
@@ -197,9 +277,13 @@ def send_push(message):
 
 if __name__ == "__main__":
     news = get_news()
-    print(f"가져온 뉴스 수: {len(news)}")
+    market_snapshot = get_market_snapshot()
 
-    message = summarize_with_openai(news)
+    print(f"가져온 뉴스 수: {len(news)}")
+    print("=== 시장 스냅샷 ===")
+    print(json.dumps(market_snapshot, ensure_ascii=False, indent=2))
+
+    message = summarize_with_openai(news, market_snapshot)
 
     print("=== 전송 메시지 시작 ===")
     print(message)
