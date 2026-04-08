@@ -26,9 +26,9 @@ jobs:
 
       - name: 실행
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_KEY_JUNS: ${{ secrets.OPENAI_API_KEY_JUNS }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          echo "OPENAI_API_KEY exists: ${OPENAI_API_KEY:+yes}"
+          echo "OPENAI_API_KEY_JUNS exists: ${OPENAI_API_KEY_JUNS:+yes}"
           echo "NTFY_TOPIC exists: ${NTFY_TOPIC:+yes}"
           python -u main.py
