@@ -25,7 +25,7 @@ def extract_summary(desc):
 
     parts = re.split(r"[.?!]", desc)
     first = parts[0].strip()
-    return first if first else desc[:160]
+    return first if first else desc[:140]
 
 
 def get_news():
@@ -37,7 +37,7 @@ def get_news():
     items = root.findall(".//item")
 
     news_list = []
-    for item in items[:8]:
+    for item in items[:6]:
         title_elem = item.find("title")
         desc_elem = item.find("description")
 
@@ -100,14 +100,13 @@ def fetch_alpha_daily_change(symbol, label):
 
 
 def get_market_snapshot():
-    # 지수 대신 API 호환성이 좋은 ETF 프록시 사용
     targets = [
-        ("미국(S&P500 프록시)", "SPY"),
-        ("미국(나스닥 프록시)", "QQQ"),
-        ("중국 주식 프록시", "MCHI"),
-        ("한국 주식 프록시", "EWY"),
-        ("달러 프록시", "UUP"),
-        ("유가 프록시", "USO"),
+        ("미국 대형주", "SPY"),
+        ("미국 기술주", "QQQ"),
+        ("중국 주식", "MCHI"),
+        ("한국 주식", "EWY"),
+        ("달러", "UUP"),
+        ("유가", "USO"),
     ]
 
     snapshot = {}
@@ -121,7 +120,7 @@ def get_market_snapshot():
                 "symbol": symbol,
                 "error": str(e),
             }
-        time.sleep(12)  # 무료 플랜 보수적 대응
+        time.sleep(12)
 
     return snapshot
 
@@ -130,13 +129,11 @@ def build_market_stats_text(market_snapshot):
     lines = []
     for label, data in market_snapshot.items():
         if "error" in data:
-            lines.append(f"- {label}: 데이터 조회 실패")
+            lines.append(f"- {label}: 조회 실패")
             continue
 
         sign = "+" if data["change_pct"] > 0 else ""
-        lines.append(
-            f"- {label}: {data['price']} ({sign}{data['change_pct']}%)"
-        )
+        lines.append(f"- {label}: {sign}{data['change_pct']}%")
     return "\n".join(lines)
 
 
@@ -155,68 +152,50 @@ def build_prompt(news_list, market_snapshot):
     prompt = f"""
 너는 세계경제 뉴스 브리핑 전문가이자 투자 관점의 시장 해설가다.
 
-아래 뉴스들과 실제 시장 지표를 함께 보고, 한국어로 짧고 직관적으로 브리핑해라.
-중요한 원칙은 "뉴스 해석"과 "실제 시장 반응"을 구분해서 보는 것이다.
-
-주의:
-- 실제 시장 통계는 ETF 프록시 기준일 수 있다.
-- 따라서 방향성과 강도는 실제 시장 참고치로 활용하고, 뉴스 흐름과 함께 종합 판단하라.
+아래 뉴스와 시장 통계를 보고, 휴대폰에서 한눈에 읽히는 짧은 브리핑을 한국어로 작성해라.
+가독성이 가장 중요하다.
 
 반드시 아래 형식을 그대로 지켜라.
 
-📊 세계경제 핵심 브리핑
+📊 세계경제 브리핑
 
-🔥 오늘 한줄 결론
-- 뉴스와 실제 시장 반응을 종합한 한 문장
+한줄:
+- 오늘 시장을 한 문장으로 요약
 
-🚨 꼭 알아야 할 이슈
-- 시장에 큰 영향을 줄 만한 사건이 있으면 최대 2개
-- 정말 중요하지 않으면 이 섹션은 생략
+체크:
+- 시장에 큰 영향을 줄 핵심 이슈 1~2개만 짧게
+- 정말 중요한 게 없으면 1개만 써도 됨
 
-📈 실제 시장 통계
-- 🇺🇸 미국 대형주: 수치와 방향
-- 🇺🇸 미국 기술주: 수치와 방향
-- 🇨🇳 중국 주식: 수치와 방향
-- 🇰🇷 한국 주식: 수치와 방향
-- 💵 달러: 수치와 방향
-- 🛢 유가: 수치와 방향
+시장:
+- 미국: 상승 압력 / 하락 압력 / 혼조 + 이유 한 줄
+- 중국: 상승 압력 / 하락 압력 / 혼조 + 이유 한 줄
+- 한국: 상승 압력 / 하락 압력 / 혼조 + 이유 한 줄
+- 달러: 강세 / 약세 / 혼조 + 이유 한 줄
+- 유가: 상승 압력 / 하락 압력 / 혼조 + 이유 한 줄
 
-🌍 시장 영향
-- 🇺🇸 미국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
-- 🇨🇳 중국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
-- 🇰🇷 한국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
-- 💵 달러: 강세 / 약세 / 혼조 가능성 중 하나를 먼저 쓰고 설명
-- 🛢 유가/원자재: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고 설명
-
-🎯 테마/업종별 체크
-- 유리한 테마 3개
-- 불리한 테마 3개
+테마:
+- [강세] 2개만
+- [약세] 2개만
 - 형식:
-  - [강세 가능] 테마명: 이유 한 줄
-  - [약세 가능] 테마명: 이유 한 줄
+  - [강세] 테마명: 이유
+  - [약세] 테마명: 이유
 
-📌 오늘 체크포인트
-- 오늘 꼭 봐야 할 변수 3개
-
-📰 주요 뉴스 3개
-1. 자연스러운 한국어 제목
-→ 왜 중요한지 한 줄
-2. 자연스러운 한국어 제목
-→ 왜 중요한지 한 줄
-3. 자연스러운 한국어 제목
-→ 왜 중요한지 한 줄
+뉴스:
+- 핵심 뉴스 2개만
+- 형식:
+  - 제목
+    → 의미 한 줄
 
 규칙:
 1. 한국어로만 작성한다.
-2. 뉴스만 보고 방향을 단정하지 말고, 아래 실제 시장 통계도 함께 반영한다.
-3. 실제 지표가 뉴스 해석과 다르면, 그 차이를 짧게 설명한다.
-4. "변동성 확대" 같은 모호한 말만 하지 말고, 방향성을 먼저 제시한다.
-5. 투자 추천처럼 단정하지 말고, "강세 가능", "약세 가능", "부담", "우위", "반등 가능성" 형태로 표현한다.
-6. 미국 주식은 금리, 빅테크, 에너지, 유동성을 반영한다.
-7. 중국 주식은 정책 기대, 경기 회복, 내수, 부동산 흐름을 반영한다.
-8. 한국 주식은 반도체, 2차전지, 자동차, 환율, 수출 민감도를 반영한다.
-9. 링크는 출력하지 않는다.
-10. 휴대폰에서 읽기 좋게 짧고 밀도 높게 작성한다.
+2. 섹션 이름 외에는 군더더기 없이 짧게 쓴다.
+3. 실제 시장 통계와 뉴스 흐름을 함께 반영한다.
+4. 숫자를 길게 나열하지 말고 방향성 중심으로 쓴다.
+5. "변동성 확대 가능성" 같은 모호한 말만 쓰지 말고, 방향을 먼저 제시한다.
+6. 뉴스 2개, 강세 2개, 약세 2개를 넘기지 마라.
+7. 각 줄은 최대한 짧게 유지하라.
+8. 투자 추천처럼 단정하지 말고 "압력", "우위", "부담", "반등 가능성" 형태로 표현하라.
+9. 출력 전체는 매우 압축적으로 작성하라.
 
 실제 시장 통계:
 {market_stats}
@@ -242,7 +221,7 @@ def summarize_with_openai(news_list, market_snapshot):
     payload = {
         "model": "gpt-5.4-nano",
         "input": prompt,
-        "max_output_tokens": 1000,
+        "max_output_tokens": 650,
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=120)
@@ -276,8 +255,8 @@ def send_push(message):
     if not message:
         raise ValueError("전송할 메시지가 비어 있습니다.")
 
-    if len(message) > 2800:
-        message = message[:2800] + "\n...(이하 생략)"
+    if len(message) > 2200:
+        message = message[:2200] + "\n...(이하 생략)"
 
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
     headers = {
