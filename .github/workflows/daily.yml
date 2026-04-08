@@ -2,7 +2,7 @@ name: Daily News
 
 on:
   schedule:
-    - cron: '30 22 * * *'
+    - cron: '30 22 * * *'  # 한국시간 오전 7:30
   workflow_dispatch:
 
 env:
@@ -22,13 +22,13 @@ jobs:
           python-version: '3.11'
 
       - name: 라이브러리 설치
-        run: pip install requests deep-translator
+        run: pip install requests
 
       - name: 실행
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
-          echo "GEMINI_API_KEY exists: ${GEMINI_API_KEY:+yes}"
+          echo "OPENAI_API_KEY exists: ${OPENAI_API_KEY:+yes}"
           echo "NTFY_TOPIC exists: ${NTFY_TOPIC:+yes}"
           python -u main.py
