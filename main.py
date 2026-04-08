@@ -5,7 +5,7 @@ import json
 import requests
 import xml.etree.ElementTree as ET
 
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY_JUNS")
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 
 
@@ -35,7 +35,7 @@ def get_news():
     items = root.findall(".//item")
 
     news_list = []
-    for item in items[:12]:  # 너무 많이 넣지 말고 12개 정도로 제한
+    for item in items[:12]:
         title_elem = item.find("title")
         link_elem = item.find("link")
         desc_elem = item.find("description")
@@ -90,6 +90,7 @@ def build_prompt(news_list):
 9. 링크는 출력하지 않는다.
 10. 불필요한 군더더기 없이 읽기 좋게 정리한다.
 11. 전체 길이는 너무 길지 않게, 푸시 알림 본문으로 읽을 수 있는 수준으로 유지한다.
+12. 같은 내용의 기사는 중복 정리하고, 전체적으로 핵심 흐름 위주로 압축한다.
 
 기사 목록:
 {joined}
@@ -100,7 +101,7 @@ def build_prompt(news_list):
 
 def summarize_with_openai(news_list):
     if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY가 비어 있습니다.")
+        raise ValueError("OPENAI_API_KEY_JUNS가 비어 있습니다.")
 
     prompt = build_prompt(news_list)
 
@@ -116,13 +117,15 @@ def summarize_with_openai(news_list):
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=120)
+    print("OpenAI 응답코드:", response.status_code)
+    print("OpenAI 응답본문:", response.text[:1000])
     response.raise_for_status()
+
     result = response.json()
 
     if result.get("output_text"):
         return result["output_text"].strip()
 
-    # fallback 파싱
     output_text = ""
     for item in result.get("output", []):
         for content in item.get("content", []):
@@ -144,7 +147,6 @@ def send_push(message):
     if not message:
         raise ValueError("전송할 메시지가 비어 있습니다.")
 
-    # ntfy 본문 너무 길면 잘라냄
     if len(message) > 3500:
         message = message[:3500] + "\n...(이하 생략)"
 
