@@ -2,11 +2,13 @@ import os
 import re
 import html
 import json
+import time
 import requests
 import xml.etree.ElementTree as ET
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY_JUNS")
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
+ALPHAVANTAGE_API_KEY = os.environ.get("ALPHAVANTAGE_API_KEY")
 
 
 def clean_html(text):
@@ -51,62 +53,75 @@ def get_news():
     return news_list
 
 
-def fetch_yahoo_chart(symbol):
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+def fetch_alpha_daily_change(symbol, label):
+    if not ALPHAVANTAGE_API_KEY:
+        raise ValueError("ALPHAVANTAGE_API_KEY가 비어 있습니다.")
+
+    url = "https://www.alphavantage.co/query"
     params = {
-        "range": "5d",
-        "interval": "1d",
-        "includePrePost": "false",
-        "events": "div,splits"
+        "function": "TIME_SERIES_DAILY",
+        "symbol": symbol,
+        "apikey": ALPHAVANTAGE_API_KEY,
+        "outputsize": "compact",
     }
 
     response = requests.get(url, params=params, timeout=30)
     response.raise_for_status()
     data = response.json()
 
-    result = data["chart"]["result"][0]
-    meta = result.get("meta", {})
-    closes = result["indicators"]["quote"][0].get("close", [])
+    if "Note" in data:
+        raise RuntimeError(f"{label} 호출 제한: {data['Note']}")
+    if "Error Message" in data:
+        raise RuntimeError(f"{label} 조회 실패: {data['Error Message']}")
 
-    valid_closes = [c for c in closes if c is not None]
-    if len(valid_closes) < 2:
-        raise ValueError(f"{symbol} 종가 데이터 부족")
+    series = data.get("Time Series (Daily)")
+    if not series:
+        raise RuntimeError(f"{label} 일별 데이터 없음: {json.dumps(data)[:500]}")
 
-    current = valid_closes[-1]
-    prev = valid_closes[-2]
-    change_pct = ((current - prev) / prev) * 100 if prev else 0.0
+    dates = sorted(series.keys())
+    if len(dates) < 2:
+        raise RuntimeError(f"{label} 데이터 부족")
+
+    last_date = dates[-1]
+    prev_date = dates[-2]
+
+    last_close = float(series[last_date]["4. close"])
+    prev_close = float(series[prev_date]["4. close"])
+    change_pct = ((last_close - prev_close) / prev_close) * 100 if prev_close else 0.0
 
     return {
+        "label": label,
         "symbol": symbol,
-        "name": meta.get("symbol", symbol),
-        "currency": meta.get("currency", ""),
-        "current": round(current, 2),
-        "prev_close": round(prev, 2),
+        "date": last_date,
+        "price": round(last_close, 2),
+        "prev_close": round(prev_close, 2),
         "change_pct": round(change_pct, 2),
     }
 
 
 def get_market_snapshot():
-    # Yahoo Finance commonly used symbols
-    targets = {
-        "미국(S&P500)": "^GSPC",
-        "미국(나스닥)": "^IXIC",
-        "중국(상하이종합)": "000001.SS",
-        "한국(코스피)": "^KS11",
-        "달러인덱스": "DX-Y.NYB",
-        "WTI유가": "CL=F",
-    }
+    # 지수 대신 API 호환성이 좋은 ETF 프록시 사용
+    targets = [
+        ("미국(S&P500 프록시)", "SPY"),
+        ("미국(나스닥 프록시)", "QQQ"),
+        ("중국 주식 프록시", "MCHI"),
+        ("한국 주식 프록시", "EWY"),
+        ("달러 프록시", "UUP"),
+        ("유가 프록시", "USO"),
+    ]
 
     snapshot = {}
 
-    for label, symbol in targets.items():
+    for label, symbol in targets:
         try:
-            snapshot[label] = fetch_yahoo_chart(symbol)
+            snapshot[label] = fetch_alpha_daily_change(symbol, label)
         except Exception as e:
             snapshot[label] = {
+                "label": label,
                 "symbol": symbol,
-                "error": str(e)
+                "error": str(e),
             }
+        time.sleep(12)  # 무료 플랜 보수적 대응
 
     return snapshot
 
@@ -120,7 +135,7 @@ def build_market_stats_text(market_snapshot):
 
         sign = "+" if data["change_pct"] > 0 else ""
         lines.append(
-            f"- {label}: {data['current']} ({sign}{data['change_pct']}%)"
+            f"- {label}: {data['price']} ({sign}{data['change_pct']}%)"
         )
     return "\n".join(lines)
 
@@ -143,6 +158,10 @@ def build_prompt(news_list, market_snapshot):
 아래 뉴스들과 실제 시장 지표를 함께 보고, 한국어로 짧고 직관적으로 브리핑해라.
 중요한 원칙은 "뉴스 해석"과 "실제 시장 반응"을 구분해서 보는 것이다.
 
+주의:
+- 실제 시장 통계는 ETF 프록시 기준일 수 있다.
+- 따라서 방향성과 강도는 실제 시장 참고치로 활용하고, 뉴스 흐름과 함께 종합 판단하라.
+
 반드시 아래 형식을 그대로 지켜라.
 
 📊 세계경제 핵심 브리핑
@@ -155,12 +174,12 @@ def build_prompt(news_list, market_snapshot):
 - 정말 중요하지 않으면 이 섹션은 생략
 
 📈 실제 시장 통계
-- 🇺🇸 S&P500: 수치와 방향을 짧게
-- 🇺🇸 나스닥: 수치와 방향을 짧게
-- 🇨🇳 중국주식(상하이): 수치와 방향을 짧게
-- 🇰🇷 한국주식(코스피): 수치와 방향을 짧게
-- 💵 달러인덱스: 수치와 방향을 짧게
-- 🛢 WTI유가: 수치와 방향을 짧게
+- 🇺🇸 미국 대형주: 수치와 방향
+- 🇺🇸 미국 기술주: 수치와 방향
+- 🇨🇳 중국 주식: 수치와 방향
+- 🇰🇷 한국 주식: 수치와 방향
+- 💵 달러: 수치와 방향
+- 🛢 유가: 수치와 방향
 
 🌍 시장 영향
 - 🇺🇸 미국 주식: 상승 압력 / 하락 압력 / 혼조 가능성 중 하나를 먼저 쓰고, 실제 지표와 뉴스 흐름을 함께 반영해서 설명
