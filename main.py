@@ -1,17 +1,19 @@
 import os
 import requests
 import xml.etree.ElementTree as ET
-import html
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 
 KEYWORDS = {
-    "금리/통화": ["rate", "fed", "interest", "inflation", "central bank"],
-    "에너지": ["oil", "gas", "energy", "crude"],
-    "중국": ["china", "beijing"],
-    "미국": ["u.s.", "us ", "america", "federal reserve"],
-    "유럽": ["europe", "ecb", "eu ", "eurozone"],
+    "금리/통화": ["rate", "fed", "interest", "inflation", "central bank", "bond", "cpi"],
+    "에너지": ["oil", "gas", "energy", "crude", "opec"],
+    "중국": ["china", "beijing", "yuan"],
+    "미국": ["u.s.", "us ", "america", "federal reserve", "treasury"],
+    "유럽": ["europe", "ecb", "eu ", "eurozone", "boe"],
+    "무역/공급망": ["trade", "tariff", "shipping", "supply chain", "export", "import"],
 }
+
+CATEGORY_ORDER = ["금리/통화", "에너지", "중국", "미국", "유럽", "무역/공급망", "기타"]
 
 
 def get_news():
@@ -23,24 +25,17 @@ def get_news():
     items = root.findall(".//item")
 
     news_list = []
-    for item in items[:10]:
+    for item in items[:20]:
         title_elem = item.find("title")
         link_elem = item.find("link")
-        desc_elem = item.find("description")
 
         title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
         link = link_elem.text.strip() if link_elem is not None and link_elem.text else ""
-        desc = desc_elem.text.strip() if desc_elem is not None and desc_elem.text else ""
-
-        desc = html.unescape(desc)
-        desc = desc.replace("<b>", "").replace("</b>", "")
-        desc = desc.replace("<br>", " ").replace("<br/>", " ").replace("<br />", " ")
 
         if title:
             news_list.append({
                 "title": title,
-                "link": link,
-                "desc": desc
+                "link": link
             })
 
     return news_list
@@ -54,26 +49,31 @@ def categorize_article(title):
     return "기타"
 
 
-def make_summary(news_list):
-    if not news_list:
-        return "오늘 가져온 세계경제 뉴스가 없습니다."
-
-    lines = ["📊 세계경제 실제 뉴스 브리핑"]
-
-    used_categories = set()
+def categorize_news(news_list):
+    grouped = {category: [] for category in CATEGORY_ORDER}
 
     for article in news_list:
         category = categorize_article(article["title"])
+        grouped[category].append(article)
 
-        if category not in used_categories:
-            lines.append(f"\n[{category}]")
-            used_categories.add(category)
+    return grouped
 
-        lines.append(f"- {article['title']}")
-        if article["link"]:
-            lines.append(article["link"])
 
-    return "\n".join(lines[:30])  # 너무 길어지는 것 방지
+def make_summary(grouped):
+    lines = ["📊 세계경제 뉴스 브리핑", "카테고리별 주요 기사 3건"]
+
+    for category in CATEGORY_ORDER:
+        articles = grouped.get(category, [])
+        if not articles:
+            continue
+
+        lines.append(f"\n[{category}]")
+        for idx, article in enumerate(articles[:3], start=1):
+            lines.append(f"{idx}. {article['title']}")
+            if article["link"]:
+                lines.append(article["link"])
+
+    return "\n".join(lines)
 
 
 def send_push(message):
@@ -87,6 +87,7 @@ def send_push(message):
 
 if __name__ == "__main__":
     news = get_news()
-    message = make_summary(news)
+    grouped = categorize_news(news)
+    message = make_summary(grouped)
     send_push(message)
     print("푸시 전송 완료")
