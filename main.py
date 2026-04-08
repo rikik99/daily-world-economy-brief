@@ -39,10 +39,16 @@ def translate_text(text):
     text = (text or "").strip()
     if not text:
         return ""
+
     try:
         translated = GoogleTranslator(source="auto", target="ko").translate(text)
         translated = (translated or "").strip()
-        return translated if translated else text
+
+        # 번역 품질 너무 이상하면 원문 유지
+        if len(translated) < 5:
+            return text
+
+        return translated
     except Exception:
         return text
 
@@ -112,11 +118,13 @@ def make_summary(grouped):
 
     message = "\n".join(lines).strip()
 
+    # 너무 길면 잘라냄
     if len(message) > 3500:
         message = message[:3500] + "\n...(이하 생략)"
 
+    # 완전 비어있을 경우 대비
     if not message:
-        message = "오늘의 세계경제 뉴스가 비어 있습니다."
+        message = "오늘의 세계경제 뉴스가 없습니다."
 
     return message
 
@@ -126,9 +134,10 @@ def send_push(message):
         raise ValueError("NTFY_TOPIC이 비어 있습니다.")
 
     url = f"https://ntfy.sh/{NTFY_TOPIC}"
+
+    # ⚠️ 헤더는 영문만 사용 (한글 넣으면 오류남)
     headers = {
-        "Title": "세계경제 뉴스 브리핑",
-        "Priority": "default",
+        "Title": "World Economy Briefing",
         "Tags": "chart_with_upwards_trend,newspaper"
     }
 
