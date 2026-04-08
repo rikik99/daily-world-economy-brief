@@ -1,6 +1,8 @@
 import os
 import requests
 import xml.etree.ElementTree as ET
+import html
+import re
 
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC")
 
@@ -16,6 +18,23 @@ KEYWORDS = {
 CATEGORY_ORDER = ["금리/통화", "에너지", "중국", "미국", "유럽", "무역/공급망", "기타"]
 
 
+def clean_html(text):
+    text = html.unescape(text)
+    text = re.sub(r"<.*?>", "", text)
+    return text.strip()
+
+
+def extract_summary(desc):
+    if not desc:
+        return ""
+
+    desc = clean_html(desc)
+
+    # 문장 1개만 추출 (너무 길어지는 것 방지)
+    parts = re.split(r"[.?!]", desc)
+    return parts[0].strip()
+
+
 def get_news():
     url = "https://news.google.com/rss/search?q=world+economy&hl=en-US&gl=US&ceid=US:en"
     response = requests.get(url, timeout=30)
@@ -25,17 +44,23 @@ def get_news():
     items = root.findall(".//item")
 
     news_list = []
+
     for item in items[:20]:
         title_elem = item.find("title")
         link_elem = item.find("link")
+        desc_elem = item.find("description")
 
-        title = title_elem.text.strip() if title_elem is not None and title_elem.text else ""
-        link = link_elem.text.strip() if link_elem is not None and link_elem.text else ""
+        title = title_elem.text.strip() if title_elem is not None else ""
+        link = link_elem.text.strip() if link_elem is not None else ""
+        desc = desc_elem.text if desc_elem is not None else ""
+
+        summary = extract_summary(desc)
 
         if title:
             news_list.append({
                 "title": title,
-                "link": link
+                "link": link,
+                "summary": summary
             })
 
     return news_list
@@ -60,7 +85,7 @@ def categorize_news(news_list):
 
 
 def make_summary(grouped):
-    lines = ["📊 세계경제 뉴스 브리핑", "카테고리별 주요 기사 3건"]
+    lines = ["📊 세계경제 핵심 브리핑", "요약 + 주요 뉴스"]
 
     for category in CATEGORY_ORDER:
         articles = grouped.get(category, [])
@@ -68,12 +93,17 @@ def make_summary(grouped):
             continue
 
         lines.append(f"\n[{category}]")
+
         for idx, article in enumerate(articles[:3], start=1):
             lines.append(f"{idx}. {article['title']}")
+
+            if article["summary"]:
+                lines.append(f"→ {article['summary']}")
+
             if article["link"]:
                 lines.append(article["link"])
 
-    return "\n".join(lines)
+    return "\n".join(lines[:50])  # 길이 제한
 
 
 def send_push(message):
