@@ -39,6 +39,7 @@ def extract_summary(desc):
     desc = clean_html(desc)
     if not desc:
         return ""
+
     parts = re.split(r"[.?!]", desc)
     first = parts[0].strip()
     return first if first else desc[:140]
@@ -78,13 +79,15 @@ def fetch_rss_query(label, query):
         desc = desc_elem.text if desc_elem is not None and desc_elem.text else ""
         pub_date = pub_elem.text.strip() if pub_elem is not None and pub_elem.text else ""
 
+        dt = parse_pubdate(pub_date)
+
         if title:
             results.append({
                 "source_label": label,
                 "title": title,
                 "summary": extract_summary(desc),
                 "pub_date": pub_date,
-                "pub_dt": parse_pubdate(pub_date),
+                "pub_dt": dt,
                 "norm_title": normalize_title(title),
             })
 
@@ -105,6 +108,7 @@ def get_news():
         key = article["norm_title"]
         if not key:
             continue
+
         if key not in dedup:
             dedup[key] = article
         else:
@@ -115,15 +119,21 @@ def get_news():
 
     unique_news = list(dedup.values())
     epoch = parsedate_to_datetime("Thu, 01 Jan 1970 00:00:00 GMT")
-    unique_news.sort(key=lambda x: x["pub_dt"] if x["pub_dt"] is not None else epoch, reverse=True)
+    unique_news.sort(
+        key=lambda x: x["pub_dt"] if x["pub_dt"] is not None else epoch,
+        reverse=True,
+    )
 
     final_news = []
     used_labels = {}
+
     for article in unique_news:
         label = article["source_label"]
         used_labels[label] = used_labels.get(label, 0) + 1
+
         if used_labels[label] <= 2:
             final_news.append(article)
+
         if len(final_news) >= 10:
             break
 
@@ -203,6 +213,7 @@ def fetch_latest_indicator(function_name, symbol, series_type="close", interval=
         if "Technical Analysis" in k:
             key = k
             break
+
     if not key:
         raise RuntimeError(f"{symbol} {function_name} 지표 데이터 없음: {json.dumps(data)[:500]}")
 
@@ -226,11 +237,16 @@ def get_market_snapshot():
     ]
 
     snapshot = {}
+
     for label, symbol in targets:
         try:
             snapshot[label] = fetch_alpha_daily_change(symbol, label)
         except Exception as e:
-            snapshot[label] = {"label": label, "symbol": symbol, "error": str(e)}
+            snapshot[label] = {
+                "label": label,
+                "symbol": symbol,
+                "error": str(e),
+            }
         time.sleep(12)
 
     return snapshot
@@ -281,6 +297,7 @@ def build_market_stats_text(market_snapshot):
         if "error" in data:
             lines.append(f"- {label}: 조회 실패")
             continue
+
         sign = "+" if data["change_pct"] > 0 else ""
         lines.append(f"- {label}: {sign}{data['change_pct']}%")
     return "\n".join(lines)
@@ -374,7 +391,6 @@ def build_prompt(news_list, market_snapshot, technical_snapshot):
 - 🇺🇸 미국: 상승 우세 / 하락 우세 / 혼조 가능성 중 하나를 먼저 쓰고 이유 한 줄
 - 🇨🇳 중국: 상승 우세 / 하락 우세 / 혼조 가능성 중 하나를 먼저 쓰고 이유 한 줄
 - 🇰🇷 한국: 상승 우세 / 하락 우세 / 혼조 가능성 중 하나를 먼저 쓰고 이유 한 줄
- 
 
 🎯 테마
 - 🟢 강세 가능 2개
@@ -480,11 +496,11 @@ if __name__ == "__main__":
 
     print(f"가져온 뉴스 수: {len(news)}")
     print("=== 뉴스 목록 ===")
-    print(json.dumps(news, ensure_ascii=False, indent=2))
+    print(json.dumps(news, ensure_ascii=False, indent=2, default=str))
     print("=== 시장 스냅샷 ===")
-    print(json.dumps(market_snapshot, ensure_ascii=False, indent=2))
+    print(json.dumps(market_snapshot, ensure_ascii=False, indent=2, default=str))
     print("=== 기술지표 스냅샷 ===")
-    print(json.dumps(technical_snapshot, ensure_ascii=False, indent=2))
+    print(json.dumps(technical_snapshot, ensure_ascii=False, indent=2, default=str))
 
     message = summarize_with_openai(news, market_snapshot, technical_snapshot)
 
